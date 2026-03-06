@@ -3,6 +3,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
 
+interface ServiceCategory {
+  name: string;
+  description: string;
+  offerings: string[];
+  pricing?: { line_items?: Record<string, string>; pricing_model?: string; pricing_disclaimer?: string };
+  typical_timeline?: string;
+}
+
+interface ProcessStep { step: number; name: string; description: string; }
+interface FaqItem { question: string; answer: string; }
+interface Testimonial { name: string; project_or_service: string; quote: string; }
+interface QualifyingType { name: string; questions: string[]; }
+interface OutOfScopeItem { service: string; response: string; }
+interface LeadField { field: string; priority: string; when_to_ask: string; }
+
 function buildSystemPrompt(): string {
   const knowledgeFile = process.env.KNOWLEDGE_FILE ?? "summit-builders-knowledge.json";
   const knowledge = JSON.parse(
@@ -12,28 +27,28 @@ function buildSystemPrompt(): string {
   const { company, hours, service_area, services, process: buildProcess, differentiators, payment_and_financing, faq, testimonials, chatbot_behavior } = knowledge;
   const { persona, conversation_goals, eligibility_check, qualifying_questions, response_rules, lead_collection, out_of_scope_services, fallback_message, closing_ctas } = chatbot_behavior;
 
-  const serviceLines = Object.values(services)
-    .filter((s: any) => s.name)
-    .map((s: any) => {
+  const serviceLines = (Object.values(services) as ServiceCategory[])
+    .filter((s) => s.name)
+    .map((s) => {
       const offeringList = s.offerings.join(", ");
       const prices = s.pricing?.line_items
-        ? Object.entries(s.pricing.line_items).map(([, v]) => v).join("; ")
+        ? Object.values(s.pricing.line_items).join("; ")
         : "";
       const disclaimer = s.pricing?.pricing_disclaimer ?? "";
-      return `${s.name}: ${s.description} Offerings: ${offeringList}.${prices ? ` Pricing (${s.pricing.pricing_model}): ${prices}.` : ""} ${disclaimer ? `Note: ${disclaimer}` : ""}${s.typical_timeline ? ` Typical timeline: ${s.typical_timeline}.` : ""}`;
+      return `${s.name}: ${s.description} Offerings: ${offeringList}.${prices ? ` Pricing (${s.pricing?.pricing_model}): ${prices}.` : ""} ${disclaimer ? `Note: ${disclaimer}` : ""}${s.typical_timeline ? ` Typical timeline: ${s.typical_timeline}.` : ""}`;
     });
 
-  const processLines = buildProcess.steps.map((s: any) => `${s.step}. ${s.name}: ${s.description}`);
+  const processLines = (buildProcess.steps as ProcessStep[]).map((s) => `${s.step}. ${s.name}: ${s.description}`);
 
-  const faqLines = faq.items.map((f: any) => `Q: ${f.question}\nA: ${f.answer}`);
+  const faqLines = (faq.items as FaqItem[]).map((f) => `Q: ${f.question}\nA: ${f.answer}`);
 
-  const qualifyingLines = Object.values(qualifying_questions)
-    .filter((qt: any) => qt.name)
-    .map((qt: any) => `${qt.name}: ${qt.questions.join(" → ")}`);
+  const qualifyingLines = (Object.values(qualifying_questions) as QualifyingType[])
+    .filter((qt) => qt.name)
+    .map((qt) => `${qt.name}: ${qt.questions.join(" → ")}`);
 
-  const outOfScopeLines = out_of_scope_services.items.map((i: any) => `- "${i.service}": ${i.response}`);
+  const outOfScopeLines = (out_of_scope_services.items as OutOfScopeItem[]).map((i) => `- "${i.service}": ${i.response}`);
 
-  const leadFields = lead_collection.fields_to_collect.map((f: any) => `- ${f.field} (priority: ${f.priority}) — ask ${f.when_to_ask}`);
+  const leadFields = (lead_collection.fields_to_collect as LeadField[]).map((f) => `- ${f.field} (priority: ${f.priority}) — ask ${f.when_to_ask}`);
 
   return `You are ${persona.assistant_name}, the ${persona.role}.
 Tone: ${persona.tone}
@@ -74,7 +89,7 @@ COMMON QUESTIONS:
 ${faqLines.join("\n\n")}
 
 TESTIMONIALS (reference naturally when relevant):
-${testimonials.items.map((t: any) => `- ${t.name} (${t.project_or_service}): "${t.quote}"`).join("\n")}
+${(testimonials.items as Testimonial[]).map((t) => `- ${t.name} (${t.project_or_service}): "${t.quote}"`).join("\n")}
 
 ELIGIBILITY — VERIFY THIS BEFORE DISCUSSING ANYTHING ELSE:
 ${eligibility_check.enabled ? `
