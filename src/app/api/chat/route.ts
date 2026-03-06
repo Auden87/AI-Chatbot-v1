@@ -1,47 +1,118 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
+import { readFileSync } from "fs";
+import { join } from "path";
 
-const SYSTEM_PROMPT = `You are the friendly and knowledgeable virtual assistant for Summit Builders, a premier construction company based in Denver, Colorado. You've been serving the Denver metro area since 2003.
+function buildSystemPrompt(): string {
+  const knowledgeFile = process.env.KNOWLEDGE_FILE ?? "summit-builders-knowledge.json";
+  const knowledge = JSON.parse(
+    readFileSync(join(process.cwd(), knowledgeFile), "utf-8")
+  );
+
+  const { company, hours, service_area, services, process: buildProcess, differentiators, payment_and_financing, faq, testimonials, chatbot_behavior } = knowledge;
+  const { persona, conversation_goals, eligibility_check, qualifying_questions, response_rules, lead_collection, out_of_scope_services, fallback_message, closing_ctas } = chatbot_behavior;
+
+  const serviceLines = Object.values(services)
+    .filter((s: any) => s.name)
+    .map((s: any) => {
+      const offeringList = s.offerings.join(", ");
+      const prices = s.pricing?.line_items
+        ? Object.entries(s.pricing.line_items).map(([, v]) => v).join("; ")
+        : "";
+      const disclaimer = s.pricing?.pricing_disclaimer ?? "";
+      return `${s.name}: ${s.description} Offerings: ${offeringList}.${prices ? ` Pricing (${s.pricing.pricing_model}): ${prices}.` : ""} ${disclaimer ? `Note: ${disclaimer}` : ""}${s.typical_timeline ? ` Typical timeline: ${s.typical_timeline}.` : ""}`;
+    });
+
+  const processLines = buildProcess.steps.map((s: any) => `${s.step}. ${s.name}: ${s.description}`);
+
+  const faqLines = faq.items.map((f: any) => `Q: ${f.question}\nA: ${f.answer}`);
+
+  const qualifyingLines = Object.values(qualifying_questions)
+    .filter((qt: any) => qt.name)
+    .map((qt: any) => `${qt.name}: ${qt.questions.join(" → ")}`);
+
+  const outOfScopeLines = out_of_scope_services.items.map((i: any) => `- "${i.service}": ${i.response}`);
+
+  const leadFields = lead_collection.fields_to_collect.map((f: any) => `- ${f.field} (priority: ${f.priority}) — ask ${f.when_to_ask}`);
+
+  return `You are ${persona.assistant_name}, the ${persona.role}.
+Tone: ${persona.tone}
+
+GOAL: ${conversation_goals.primary}. ${conversation_goals.secondary}. Desired conversion action: ${conversation_goals.conversion_action}.
 
 COMPANY INFORMATION:
-- Name: Summit Builders LLC
-- Location: 4521 Brighton Blvd, Denver, CO 80216
-- Phone: (303) 555-0142
-- Email: info@summitbuilders.com
-- Hours: Monday-Friday 7AM-6PM, Saturday 8AM-2PM
-- Service Area: Denver metro area including Arvada, Aurora, Boulder, Broomfield, Castle Rock, Centennial, Golden, Highlands Ranch, Lakewood, Littleton, Lone Tree, Parker, and Westminster
-- Licensed, insured, and bonded in the State of Colorado
-- Over 500 projects completed
+- Name: ${company.name}${company.tagline ? ` — "${company.tagline}"` : ""}
+- Industry: ${company.industry} | Founded: ${company.founded}${company.owner_or_contact ? ` | Owner: ${company.owner_or_contact}` : ""}
+- Address: ${company.address}
+- Phone: ${company.phone} | Email: ${company.email} | Website: ${company.website}
+- Hours: Mon–Fri ${hours.regular.monday_friday}, Sat ${hours.regular.saturday}, Sun ${hours.regular.sunday}${hours.after_hours_or_emergency ? `\n- Emergency: ${hours.after_hours_or_emergency}` : ""}${hours.response_time_promise ? `\n- Response time: ${hours.response_time_promise}` : ""}
+- Credentials: ${[company.license_number ? `License ${company.license_number}` : null, company.insurance_summary, company.certifications].filter(Boolean).join(", ")}
+- Stats: ${Object.entries(company.key_stats).filter(([k]) => !k.startsWith("_")).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join(", ")}
+
+SERVICE AREA (${service_area.type}):
+Primary: ${service_area.primary_cities_or_zones.join(", ")}
+${service_area.extended_cities_or_zones?.length ? `Extended: ${service_area.extended_cities_or_zones.join(", ")}${service_area.extended_area_note ? ` (${service_area.extended_area_note})` : ""}` : ""}
+${service_area.max_radius ? `Max radius: ${service_area.max_radius}` : ""}
 
 SERVICES:
-1. Residential Remodeling: Kitchen remodels ($25K-$80K+), bathroom remodels ($15K-$50K+), basement finishing ($30K-$70K+), room additions, deck and outdoor living spaces, whole-home renovations
-2. Commercial Buildouts: Office tenant improvements, retail and restaurant buildouts, warehouse conversions, ADA compliance upgrades
-3. Custom Homes: Full custom design-build, energy-efficient construction, luxury finishes, mountain and urban builds (starting from $350K+, typical range $500K-$1.5M+)
+${serviceLines.join("\n\n")}
 
-PROCESS:
-1. Free consultation and on-site visit
-2. Detailed proposal within 48 hours
-3. Contract signing and permitting
-4. Construction with dedicated project manager
-5. Final walkthrough and handover
+OUR PROCESS:
+${processLines.join("\n")}
 
-GUIDELINES:
-- Be warm, professional, and helpful
-- Always note that exact pricing requires an on-site visit; the ranges above are rough estimates
-- Qualify leads by naturally asking about their project type, timeline, and budget range
-- Encourage visitors to schedule a free estimate or call (303) 555-0142
-- If asked about something you're unsure of, say "Let me have our team get back to you on that — can I grab your name and phone number?"
-- Never make up specific pricing for a project without seeing it
-- Keep responses concise (2-4 sentences unless more detail is needed)
-- If someone has a complaint, be empathetic and direct them to call the office directly`;
+WHAT MAKES US DIFFERENT:
+${differentiators.points.map((d: string) => `- ${d}`).join("\n")}
+
+PAYMENT & FINANCING:
+${[
+  payment_and_financing.accepted_payment_methods ? `Accepted payments: ${payment_and_financing.accepted_payment_methods}` : null,
+  payment_and_financing.financing_available ? `Financing available: ${payment_and_financing.financing_details}` : "No financing offered.",
+  payment_and_financing.deposit_policy ? `Deposit: ${payment_and_financing.deposit_policy}` : null
+].filter(Boolean).join("\n")}
+
+COMMON QUESTIONS:
+${faqLines.join("\n\n")}
+
+TESTIMONIALS (reference naturally when relevant):
+${testimonials.items.map((t: any) => `- ${t.name} (${t.project_or_service}): "${t.quote}"`).join("\n")}
+
+ELIGIBILITY — VERIFY THIS BEFORE DISCUSSING ANYTHING ELSE:
+${eligibility_check.enabled ? `
+Check type: ${eligibility_check.check_type}
+Goal: ${eligibility_check.check_description}
+Opening question: "${eligibility_check.qualifying_question}"
+Eligible values: ${eligibility_check.eligible_values.join(", ")}
+If eligible: "${eligibility_check.eligible_response}"
+If ineligible: "${eligibility_check.ineligible_response}"
+If ambiguous: "${eligibility_check.ambiguous_response}"
+`.trim() : "No eligibility check required — serve all visitors."}
+
+QUALIFYING QUESTIONS BY PROJECT TYPE (ask one at a time in order until you can give a confident estimate):
+${qualifyingLines.join("\n")}
+
+OUT OF SCOPE SERVICES:
+${outOfScopeLines.join("\n")}
+
+LEAD COLLECTION (weave in naturally, never all at once):
+${leadFields.join("\n")}
+Rules: ${lead_collection.collection_rules.join(" | ")}
+
+RESPONSE RULES:
+${response_rules.map((r: string) => `- ${r}`).join("\n")}
+
+CLOSING CALL-TO-ACTIONS (use naturally when the moment is right):
+${closing_ctas.map((c: string) => `- ${c}`).join("\n")}
+
+FALLBACK: ${fallback_message}`;
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const { message } = await request.json();
+    const { messages } = await request.json();
 
-    if (!message || typeof message !== "string") {
+    if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
-        { error: "Message is required" },
+        { error: "Messages are required" },
         { status: 400 }
       );
     }
@@ -56,11 +127,15 @@ export async function POST(request: NextRequest) {
 
     const client = new Anthropic({ apiKey });
 
+    // Anthropic requires messages to start with a user turn — skip any leading assistant messages (e.g. the greeting)
+    const firstUserIndex = messages.findIndex((m: { role: string }) => m.role === "user");
+    const history = firstUserIndex >= 0 ? messages.slice(firstUserIndex) : messages;
+
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: message }],
+      system: buildSystemPrompt(),
+      messages: history,
     });
 
     const textBlock = response.content.find((block) => block.type === "text");
